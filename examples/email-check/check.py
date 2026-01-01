@@ -1,3 +1,11 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "flask",
+#     "flask-cors",
+# ]
+# ///
+
 import re
 import os
 from flask import Flask, request, jsonify

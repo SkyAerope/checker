@@ -2,14 +2,9 @@
 
 [check.py](./check.py)是一个后端示例，它使用正则表达式来检查邮箱的合法性。
 
-## 安装依赖
-```bash
-pip install flask flask-cors
-```
-
 ## 运行
 ```bash
-python check.py
+uv run check.py
 ```
 
 服务端会运行在`http://localhost:5000`。如果你设置了`PORT`环境变量，那么服务端会运行在`http://localhost:${PORT}`。
@@ -27,5 +22,4 @@ email..email@example.com
 .email@example.com
 email.@example.com
 email@.example.com
-email@.com
 ```
