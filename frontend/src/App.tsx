@@ -43,9 +43,10 @@ function App() {
     unknown: '未知',
   };
 
-  const handleUndo = useCallback(() => {
+  const handleUndo = useCallback((snackbarId?: string | number) => {
     const clearUndo = clearUndoRef.current;
     if (!clearUndo) return;
+    if (snackbarId != null && clearUndo.snackbarKey !== snackbarId) return;
 
     switch (clearUndo.type) {
       case 'valid':
@@ -166,22 +167,7 @@ function App() {
           color="inherit"
           size="small"
           onClick={() => {
-            const undo = clearUndoRef.current;
-            if (undo && undo.snackbarKey === snackbarId) {
-              switch (undo.type) {
-                case 'valid':
-                  setValidItems(undo.items);
-                  break;
-                case 'invalid':
-                  setInvalidItems(undo.items);
-                  break;
-                case 'unknown':
-                  setUnknownItems(undo.items);
-                  break;
-              }
-              clearUndoRef.current = null;
-            }
-            closeSnackbar(snackbarId);
+            handleUndo(snackbarId);
           }}
         >
           撤销
@@ -190,7 +176,7 @@ function App() {
     });
 
     clearUndoRef.current = { type, items, snackbarKey: key };
-  }, [validItems, invalidItems, unknownItems, enqueueSnackbar, statusLabels]);
+  }, [validItems, invalidItems, unknownItems, enqueueSnackbar, statusLabels, handleUndo]);
 
   const noBackendConfigured = !backendUrl;
 
