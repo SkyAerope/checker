@@ -18,21 +18,34 @@ import { checkHealth } from '../services/api';
 interface SettingsPanelProps {
   backendUrl: string;
   onBackendUrlChange: (url: string) => void;
+  concurrency: number;
+  onConcurrencyChange: (value: number) => void;
   disabled?: boolean;
 }
 
 export function SettingsPanel({
   backendUrl,
   onBackendUrlChange,
+  concurrency,
+  onConcurrencyChange,
   disabled = false,
 }: SettingsPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [inputUrl, setInputUrl] = useState(backendUrl);
+  const [inputConcurrency, setInputConcurrency] = useState(String(concurrency));
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
 
+  const parsedConcurrency = Number.parseInt(inputConcurrency, 10);
+  const concurrencyValid = Number.isFinite(parsedConcurrency) && parsedConcurrency >= 1;
+
   const handleSave = () => {
     onBackendUrlChange(inputUrl);
+    if (concurrencyValid) {
+      const next = Math.min(Math.max(parsedConcurrency, 1), 64);
+      onConcurrencyChange(next);
+      setInputConcurrency(String(next));
+    }
     setTestResult(null);
   };
 
@@ -85,6 +98,22 @@ export function SettingsPanel({
             sx={{ mb: 2 }}
           />
 
+          <TextField
+            fullWidth
+            label="并发数"
+            type="number"
+            value={inputConcurrency}
+            onChange={(e) => {
+              setInputConcurrency(e.target.value);
+            }}
+            disabled={disabled}
+            size="small"
+            inputProps={{ min: 1, max: 64 }}
+            helperText="范围 1-64，默认 8"
+            error={inputConcurrency.trim().length > 0 && !concurrencyValid}
+            sx={{ mb: 2 }}
+          />
+
           {testResult && (
             <Alert
               severity={testResult === 'success' ? 'success' : 'error'}
@@ -113,7 +142,12 @@ export function SettingsPanel({
             <Button
               variant="contained"
               onClick={handleSave}
-              disabled={disabled || !inputUrl || inputUrl === backendUrl}
+              disabled={
+                disabled
+                || !inputUrl
+                || !concurrencyValid
+                || (inputUrl === backendUrl && parsedConcurrency === concurrency)
+              }
             >
               保存
             </Button>

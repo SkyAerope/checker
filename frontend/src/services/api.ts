@@ -1,7 +1,11 @@
 import type { CheckResponse } from '../types';
 
 // 检查单条数据
-export async function checkData(backendUrl: string, data: string): Promise<CheckResponse> {
+export async function checkData(
+  backendUrl: string,
+  data: string,
+  signal?: AbortSignal,
+): Promise<CheckResponse> {
   const url = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
 
   const response = await fetch(url, {
@@ -10,6 +14,7 @@ export async function checkData(backendUrl: string, data: string): Promise<Check
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ data }),
+    signal,
   });
 
   if (!response.ok) {

@@ -6,6 +6,8 @@ import { checkData } from './services/api';
 import type { CheckResultItem, CheckStatus } from './types';
 
 const STORAGE_KEY_BACKEND_URL = 'checker_backend_url';
+const STORAGE_KEY_CONCURRENCY = 'checker_concurrency';
+const DEFAULT_CONCURRENCY = 8;
 
 interface ClearUndoState {
   type: CheckStatus;
@@ -16,6 +18,12 @@ interface ClearUndoState {
 function App() {
   const [backendUrl, setBackendUrl] = useState(() => {
     return localStorage.getItem(STORAGE_KEY_BACKEND_URL) || '';
+  });
+  const [concurrency, setConcurrency] = useState(() => {
+    const raw = localStorage.getItem(STORAGE_KEY_CONCURRENCY);
+    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CONCURRENCY;
+    if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_CONCURRENCY;
+    return Math.min(Math.max(parsed, 1), 64);
   });
   const [inputData, setInputData] = useState('');
   const [isRunning, setIsRunning] = useState(false);
@@ -36,6 +44,10 @@ function App() {
       localStorage.setItem(STORAGE_KEY_BACKEND_URL, backendUrl);
     }
   }, [backendUrl]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_CONCURRENCY, String(concurrency));
+  }, [concurrency]);
 
   const statusLabels: Record<CheckStatus, string> = {
     valid: '有效',
@@ -84,57 +96,97 @@ function App() {
     setProgress(0);
     setTotal(lines.length);
     abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
+    const clampConcurrency = Math.min(Math.max(concurrency, 1), 64);
+    const workerCount = Math.min(clampConcurrency, lines.length);
 
     let currentInput = inputData;
+    let nextToRemoveIndex = 0;
+    const finishedInOrder: boolean[] = new Array(lines.length).fill(false);
 
-    for (let i = 0; i < lines.length; i++) {
-      if (abortControllerRef.current?.signal.aborted) {
-        break;
-      }
+    const removeOneLineFromInput = (text: string, line: string) => {
+      const lineIndex = text.indexOf(line);
+      if (lineIndex === -1) return text;
+      const beforeLine = text.substring(0, lineIndex);
+      const afterLine = text.substring(lineIndex + line.length);
+      return (beforeLine + afterLine)
+        .replace(/^\n+|\n+$/g, '')
+        .replace(/\n{2,}/g, '\n');
+    };
 
-      const line = lines[i];
-
-      try {
-        const response = await checkData(backendUrl, line);
-        const resultItem: CheckResultItem = {
-          data: line,
-          status: response.status,
-          detail: response.detail,
-        };
-
-        switch (response.status) {
-          case 'valid':
-            setValidItems((prev) => [...prev, resultItem]);
-            break;
-          case 'invalid':
-            setInvalidItems((prev) => [...prev, resultItem]);
-            break;
-          default:
-            setUnknownItems((prev) => [...prev, resultItem]);
-        }
-      } catch (err) {
-        const resultItem: CheckResultItem = {
-          data: line,
-          status: 'unknown',
-          detail: err instanceof Error ? err.message : '请求失败',
-        };
-        setUnknownItems((prev) => [...prev, resultItem]);
-      }
-
-      const lineIndex = currentInput.indexOf(line);
-      if (lineIndex !== -1) {
-        const beforeLine = currentInput.substring(0, lineIndex);
-        const afterLine = currentInput.substring(lineIndex + line.length);
-        currentInput = (beforeLine + afterLine).replace(/^\n+|\n+$/g, '').replace(/\n{2,}/g, '\n');
+    const tryCommitInputRemoval = () => {
+      while (nextToRemoveIndex < lines.length && finishedInOrder[nextToRemoveIndex]) {
+        currentInput = removeOneLineFromInput(currentInput, lines[nextToRemoveIndex]);
         setInputData(currentInput);
+        nextToRemoveIndex++;
       }
+    };
 
-      setProgress(i + 1);
-    }
+    let nextIndex = 0;
+    const runWorker = async () => {
+      while (true) {
+        if (signal.aborted) return;
+        const index = nextIndex;
+        nextIndex++;
+        if (index >= lines.length) return;
+
+        const line = lines[index];
+
+        let processed = false;
+        try {
+          const response = await checkData(backendUrl, line, signal);
+          processed = true;
+
+          const resultItem: CheckResultItem = {
+            data: line,
+            status: response.status,
+            detail: response.detail,
+          };
+
+          switch (response.status) {
+            case 'valid':
+              setValidItems((prev) => [...prev, resultItem]);
+              break;
+            case 'invalid':
+              setInvalidItems((prev) => [...prev, resultItem]);
+              break;
+            default:
+              setUnknownItems((prev) => [...prev, resultItem]);
+          }
+        } catch (err) {
+          const isAbortError =
+            signal.aborted
+            || (err instanceof DOMException && err.name === 'AbortError');
+          if (isAbortError) {
+            return;
+          }
+
+          processed = true;
+          const resultItem: CheckResultItem = {
+            data: line,
+            status: 'unknown',
+            detail: err instanceof Error ? err.message : '请求失败',
+          };
+          setUnknownItems((prev) => [...prev, resultItem]);
+        } finally {
+          if (!processed) {
+            continue;
+          }
+
+          finishedInOrder[index] = true;
+          setProgress((prev) => prev + 1);
+          tryCommitInputRemoval();
+        }
+      }
+    };
+
+    const workers = Array.from({ length: workerCount }, () => runWorker());
+    await Promise.allSettled(workers);
 
     setIsRunning(false);
     abortControllerRef.current = null;
-  }, [backendUrl, inputData, enqueueSnackbar]);
+  }, [backendUrl, concurrency, inputData, enqueueSnackbar]);
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -192,10 +244,12 @@ function App() {
 
       <Container maxWidth="xl" sx={{ py: 3 }}>
         <SettingsPanel
-        backendUrl={backendUrl}
-        onBackendUrlChange={setBackendUrl}
-        disabled={isRunning}
-      />
+          backendUrl={backendUrl}
+          onBackendUrlChange={setBackendUrl}
+          concurrency={concurrency}
+          onConcurrencyChange={setConcurrency}
+          disabled={isRunning}
+        />
 
       {noBackendConfigured && (
         <Alert severity="info" sx={{ mb: 2 }}>
