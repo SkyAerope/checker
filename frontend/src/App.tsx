@@ -101,26 +101,14 @@ function App() {
     const clampConcurrency = Math.min(Math.max(concurrency, 1), 64);
     const workerCount = Math.min(clampConcurrency, lines.length);
 
-    let currentInput = inputData;
-    let nextToRemoveIndex = 0;
-    const finishedInOrder: boolean[] = new Array(lines.length).fill(false);
-
-    const removeOneLineFromInput = (text: string, line: string) => {
-      const lineIndex = text.indexOf(line);
-      if (lineIndex === -1) return text;
-      const beforeLine = text.substring(0, lineIndex);
-      const afterLine = text.substring(lineIndex + line.length);
-      return (beforeLine + afterLine)
+    const removeOneLineFromInput = (text: string, targetTrimmed: string) => {
+      const rawLines = text.split('\n');
+      const index = rawLines.findIndex((raw) => raw.trim() === targetTrimmed);
+      if (index === -1) return text;
+      rawLines.splice(index, 1);
+      return rawLines.join('\n')
         .replace(/^\n+|\n+$/g, '')
         .replace(/\n{2,}/g, '\n');
-    };
-
-    const tryCommitInputRemoval = () => {
-      while (nextToRemoveIndex < lines.length && finishedInOrder[nextToRemoveIndex]) {
-        currentInput = removeOneLineFromInput(currentInput, lines[nextToRemoveIndex]);
-        setInputData(currentInput);
-        nextToRemoveIndex++;
-      }
     };
 
     let nextIndex = 0;
@@ -133,10 +121,8 @@ function App() {
 
         const line = lines[index];
 
-        let processed = false;
         try {
           const response = await checkData(backendUrl, line, signal);
-          processed = true;
 
           const resultItem: CheckResultItem = {
             data: line,
@@ -162,22 +148,16 @@ function App() {
             return;
           }
 
-          processed = true;
           const resultItem: CheckResultItem = {
             data: line,
             status: 'unknown',
             detail: err instanceof Error ? err.message : '请求失败',
           };
           setUnknownItems((prev) => [...prev, resultItem]);
-        } finally {
-          if (!processed) {
-            continue;
-          }
-
-          finishedInOrder[index] = true;
-          setProgress((prev) => prev + 1);
-          tryCommitInputRemoval();
         }
+
+        setProgress((prev) => prev + 1);
+        setInputData((prev) => removeOneLineFromInput(prev, line));
       }
     };
 
